@@ -1,81 +1,42 @@
-name: Subscription Checker & Cleaner
+name: Subscription Checker
 
 on:
   schedule:
-    - cron: '0 */8 * * *'
-  workflow_dispatch:
+    - cron: '0 */8 * * *'  # 每8小时运行一次
+  workflow_dispatch:        # 允许手动触发
 
 jobs:
-  check-clean-subscriptions:
+  check-subscriptions:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout 当前仓库
+      - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: 安装 Python 模块
-        run: pip install requests pyyaml
-
-      - name: 过滤 reality 节点，生成干净订阅文件
+        
+      - name: List all files in current directory
         run: |
-          mkdir -p config
-          cat << 'EOF' > filter.py
-          import requests, yaml
+          echo "当前目录的所有文件:"
+          ls -al
 
-          urls = [
-              "https://raw.githubusercontent.com/firefoxmmx2/v2rayshare_subcription/main/subscription/clash_sub.yaml",
-              "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/Eternity.yml",
-              "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/clash.yml"
-              # 可以添加更多订阅链接
-          ]
-
-          def fetch(url):
-              try:
-                  print(f"📥 获取：{url}")
-                  r = requests.get(url, timeout=10)
-                  return yaml.safe_load(r.text)
-              except Exception as e:
-                  print(f"❌ 跳过: {url} -> {e}")
-                  return {}
-
-          def filter_nodes(data):
-              proxies = data.get("proxies", [])
-              return [p for p in proxies if not (p.get("type") == "vless" and p.get("reality-opts"))]
-
-          proxies = []
-          for u in urls:
-              content = fetch(u)
-              proxies += filter_nodes(content)
-
-          with open("config/nodes.yaml", "w", encoding="utf-8") as f:
-              yaml.dump({"proxies": proxies}, f, allow_unicode=True)
-
-          print(f"✅ 节点数: {len(proxies)}，已写入 config/nodes.yaml")
-          EOF
-
-          python3 filter.py
-
-      - name: 运行 subs-check 检查干净的节点
+      - name: Run subscription checker
         run: |
-          mkdir -p output
           docker run --rm \
             -v ${{ github.workspace }}/config:/app/config \
             -v ${{ github.workspace }}/output:/app/output \
             ghcr.io/jackrun123/subs-check:latest
 
-      - name: Checkout 目标仓库
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
-          repository: GuoBing1989100/v2ray_configs
-          token: ${{ secrets.PAT_TOKEN }}
+          repository: GuoBing1989100/v2ray_configs  # 替换为目标仓库
+          token: ${{ secrets.PAT_TOKEN }}  # 使用 Personal Access Token
           path: target-repo
 
-      - name: 推送检测结果
+      - name: Copy and commit changes
         run: |
           cp -r output/* target-repo/
           cd target-repo
-          git config --local user.name "github-actions[bot]"
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           git add *.txt
-          git commit -m "定时更新：subs-check 检测通过节点" || echo "没有变更"
+          git commit -m "更新订阅检查结果" || echo "没有变更需要提交"
           git push
