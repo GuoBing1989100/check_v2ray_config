@@ -1,79 +1,67 @@
-name: Subscription Cleaner
+name: Subscription Checker & Cleaner
 
 on:
   schedule:
-    - cron: '0 */8 * * *'  # 每8小时运行一次
+    - cron: '0 */8 * * *'
   workflow_dispatch:
 
 jobs:
-  filter-subscriptions:
+  check-clean-subscriptions:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout 当前仓库
         uses: actions/checkout@v4
 
-      - name: 安装 Python 依赖
+      - name: 安装 Python 模块
         run: pip install requests pyyaml
 
-      - name: 运行过滤脚本，清除 reality 节点
+      - name: 过滤 reality 节点，生成干净订阅文件
         run: |
-          cat << 'EOF' > filter_reality.py
-          import requests
-          import yaml
+          mkdir -p config
+          cat << 'EOF' > filter.py
+          import requests, yaml
 
           urls = [
               "https://raw.githubusercontent.com/firefoxmmx2/v2rayshare_subcription/main/subscription/clash_sub.yaml",
-              # 你可以继续添加订阅链接 ↓↓↓
               "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/Eternity.yml",
               "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/clash.yml"
+              # 可以添加更多订阅链接
           ]
 
-          def download_yaml(url):
+          def fetch(url):
               try:
-                  print(f"📥 下载：{url}")
+                  print(f"📥 获取：{url}")
                   r = requests.get(url, timeout=10)
                   return yaml.safe_load(r.text)
               except Exception as e:
-                  print(f"❌ 错误：{url} -> {e}")
+                  print(f"❌ 跳过: {url} -> {e}")
                   return {}
 
-          def filter_proxies(data):
+          def filter_nodes(data):
               proxies = data.get("proxies", [])
-              clean = []
-              for p in proxies:
-                  if p.get("type") == "vless" and p.get("reality-opts"):
-                      print(f"🚫 过滤 reality 节点：{p.get('name')}")
-                      continue
-                  clean.append(p)
-              return clean
+              return [p for p in proxies if not (p.get("type") == "vless" and p.get("reality-opts"))]
 
-          merged_proxies = []
-          for url in urls:
-              content = download_yaml(url)
-              merged_proxies += filter_proxies(content)
+          proxies = []
+          for u in urls:
+              content = fetch(u)
+              proxies += filter_nodes(content)
 
-          output = {
-              "proxies": merged_proxies,
-              "proxy-groups": [
-                  {
-                      "name": "🚀 自动选择",
-                      "type": "url-test",
-                      "proxies": [p["name"] for p in merged_proxies],
-                      "url": "http://www.gstatic.com/generate_204",
-                      "interval": 300
-                  }
-              ],
-              "rules": ["MATCH,🚀 自动选择"]
-          }
+          with open("config/nodes.yaml", "w", encoding="utf-8") as f:
+              yaml.dump({"proxies": proxies}, f, allow_unicode=True)
 
-          with open("merged.yaml", "w", encoding="utf-8") as f:
-              yaml.dump(output, f, allow_unicode=True)
-
-          print(f"✅ 已输出 {len(merged_proxies)} 个节点 → merged.yaml")
+          print(f"✅ 节点数: {len(proxies)}，已写入 config/nodes.yaml")
           EOF
 
-          python3 filter_reality.py
+          python3 filter.py
+
+      - name: 运行 subs-check 检查干净的节点
+        run: |
+          mkdir -p output
+          docker run --rm \
+            -v ${{ github.workspace }}/config:/app/config \
+            -v ${{ github.workspace }}/output:/app/output \
+            ghcr.io/jackrun123/subs-check:latest
 
       - name: Checkout 目标仓库
         uses: actions/checkout@v4
@@ -82,12 +70,12 @@ jobs:
           token: ${{ secrets.PAT_TOKEN }}
           path: target-repo
 
-      - name: 复制输出并提交合并文件
+      - name: 推送检测结果
         run: |
-          cp merged.yaml target-repo/merged.yaml
+          cp -r output/* target-repo/
           cd target-repo
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add merged.yaml
-          git commit -m "自动过滤 reality 节点并更新订阅" || echo "无变更"
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git add *.txt
+          git commit -m "定时更新：subs-check 检测通过节点" || echo "没有变更"
           git push
