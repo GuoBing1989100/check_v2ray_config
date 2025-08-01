@@ -19,6 +19,7 @@ jobs:
 
       - name: Run subscription checker
         run: |
+          set +e
           docker run --rm \
             -v ${{ github.workspace }}/config:/app/config \
             -v ${{ github.workspace }}/output:/app/output \
