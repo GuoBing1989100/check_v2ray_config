@@ -37,6 +37,8 @@ keep-success-proxies: false
 # 输出目录
 # 如果为空，则为程序所在目录的config目录
 output-dir: ""
+output-format: base64  # 输出标准base64格式的 all.txt
+skip-error: true
 
 # 填写搭建的apprise API server 地址
 # https://notify.xxxx.us.kg/notify
