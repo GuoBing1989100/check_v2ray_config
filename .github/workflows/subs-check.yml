@@ -26,7 +26,7 @@ jobs:
               "https://raw.githubusercontent.com/firefoxmmx2/v2rayshare_subcription/main/subscription/clash_sub.yaml",
               "https://raw.githubusercontent.com/mahdibland/ShadowsocksAggregator/master/Eternity.yml",
               "https://raw.githubusercontent.com/ermaozi/get_subscribe/main/subscribe/clash.yml"
-              # 可以添加更多订阅链接
+              # 可继续添加更多订阅链接
           ]
 
           def fetch(url):
@@ -54,6 +54,13 @@ jobs:
           EOF
 
           python3 filter.py
+
+      - name: 检查 nodes.yaml 是否为空
+        run: |
+          if [ ! -s config/nodes.yaml ]; then
+            echo "❌ config/nodes.yaml 为空，跳过 subs-check"
+            exit 0
+          fi
 
       - name: 运行 subs-check 检查干净的节点
         run: |
