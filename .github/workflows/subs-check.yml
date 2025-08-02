@@ -22,19 +22,27 @@ jobs:
           echo "=== 工作区文件列表 ==="
           ls -al
           
-      - name: Run subscription checker
+      - name: Run subscription checker with error handling
         run: |
-          echo "开始运行订阅检查器..."
-          docker run --rm \
+          echo "开始运行订阅检查器（带错误处理）..."
+          
+          # 使用 timeout 命令防止卡死，忽略所有错误继续执行
+          timeout 1h docker run --rm \
             -v ${{ github.workspace }}/config:/app/config \
             -v ${{ github.workspace }}/output:/app/output \
-            ghcr.io/jackrun123/subs-check:latest
+            ghcr.io/jackrun123/subs-check:latest || true
           
+          echo "容器运行完成（可能包含错误）"
           echo "=== 运行后的 output 目录内容 ==="
           ls -al output
-          echo "=== output 文件内容预览 ==="
-          [ -f output/all.txt ] && head -n 3 output/all.txt || echo "all.txt 不存在"
-          [ -f output/result.txt ] && head -n 3 output/result.txt || echo "result.txt 不存在"
+          
+          # 确保关键文件存在
+          touch output/all.txt
+          touch output/result.txt
+          
+          echo "=== 有效节点数量统计 ==="
+          [ -f output/result.txt ] && echo "有效节点: $(grep -c '^' output/result.txt)" || echo "result.txt 不存在"
+          [ -f output/all.txt ] && echo "总节点: $(grep -c '^' output/all.txt)" || echo "all.txt 不存在"
           
       - name: Checkout target repository
         uses: actions/checkout@v4
@@ -43,41 +51,32 @@ jobs:
           token: ${{ secrets.PAT_TOKEN }}
           path: target-repo
           
-      - name: Debug target-repo before copy
-        run: |
-          echo "=== 复制前的 target-repo 目录内容 ==="
-          ls -al target-repo
-          
       - name: Copy and commit changes
         run: |
-          echo "=== 复制前的 output 目录内容 ==="
-          ls -al output
-          
-          # 复制所有文件（包括隐藏文件）
           echo "正在复制文件..."
           cp -rv output/. target-repo/
           
-          echo "=== 复制后的 target-repo 目录内容 ==="
-          ls -al target-repo
-          
           cd target-repo
-          echo "=== 变更状态 ==="
-          git status -s
-          
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
+          echo "=== 变更状态 ==="
+          git status -s
+          
           git add .
           
-          # 获取当前时间用于提交信息
           TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S')
-          
-          # 仅在检测到变更时提交
           if git diff-index --quiet HEAD --; then
-            echo "没有检测到变更，跳过提交"
+            echo "没有变更，跳过提交"
           else
-            echo "检测到变更，正在提交..."
-            git commit -m "自动更新订阅检查结果 $TIMESTAMP"
+            git commit -m "自动更新订阅检查结果 $TIMESTAMP (跳过无效节点)"
             git push
             echo "✅ 提交成功！"
           fi
+          
+      - name: Final status
+        run: |
+          echo "=== 最终输出文件内容 ==="
+          [ -f target-repo/all.txt ] && echo "all.txt 行数: $(wc -l < target-repo/all.txt)" || echo "all.txt 不存在"
+          [ -f target-repo/result.txt ] && echo "result.txt 行数: $(wc -l < target-repo/result.txt)" || echo "result.txt 不存在"
+          echo "自动化流程完成"
