@@ -1,4 +1,4 @@
-name: Robust Subscription Checker
+name: V2Ray Subscription Checker
 
 on:
   schedule:
@@ -10,90 +10,55 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # 拉取当前仓库（包含配置文件）
         
-      - name: Set up environment
+      - name: Verify config file
         run: |
-          # 创建必要目录
+          echo "检查配置文件..."
+          if [ -f config/config.yaml ]; then
+            echo "✅ 找到配置文件: config/config.yaml"
+            echo "=== 配置文件行数 ==="
+            wc -l config/config.yaml
+          else
+            echo "❌ 错误：未找到配置文件 config/config.yaml"
+            exit 1
+          fi
+          
+      - name: Prepare environment
+        run: |
+          # 创建输出目录
           mkdir -p output
-          mkdir -p logs
           
-          # 初始化空的有效节点文件
-          touch output/valid_nodes.txt
-          touch output/all_nodes.txt
+          # 确保输出目录权限
+          chmod -R 777 output
           
-          echo "环境准备完成"
+          echo "工作目录结构:"
+          ls -al
+          echo "配置文件内容摘要:"
+          grep -E 'sub-urls:|output-dir:|concurrent:' config/config.yaml
           
-      - name: Fetch subscriptions
+      - name: Run subscription checker
         run: |
-          echo "获取订阅链接..."
-          # 这里添加获取订阅链接的实际代码
-          # 示例：从配置文件中读取订阅链接
-          SUBSCRIPTIONS=$(cat config/subscriptions.txt | grep -v '^#')
-          echo "找到订阅链接："
-          echo "$SUBSCRIPTIONS"
-          echo "$SUBSCRIPTIONS" > output/subscriptions.txt
+          echo "开始运行订阅检查器..."
           
-      - name: Process each subscription
-        run: |
-          echo "开始处理每个订阅链接..."
-          while read -r sub_url; do
-            if [ -z "$sub_url" ]; then
-              continue
-            fi
-            
-            echo "处理订阅: $sub_url"
-            
-            # 使用安全的检查方法，忽略错误
-            docker run --rm \
-              -v ${{ github.workspace }}/config:/app/config \
-              -v ${{ github.workspace }}/output:/app/output \
-              ghcr.io/jackrun123/subs-check:latest \
-              --url "$sub_url" \
-              --output output/temp_nodes.txt \
-              --skip-errors || true
-              
-            # 将有效节点追加到总文件
-            if [ -f output/temp_nodes.txt ]; then
-              echo "找到有效节点: $(wc -l < output/temp_nodes.txt)"
-              cat output/temp_nodes.txt >> output/valid_nodes.txt
-              cat output/temp_nodes.txt >> output/all_nodes.txt
-              rm output/temp_nodes.txt
-            fi
-            
-            # 添加分隔标记
-            echo "# Subscription: $sub_url" >> output/all_nodes.txt
-            echo "" >> output/all_nodes.txt
-            
-          done < output/subscriptions.txt
+          # 使用超时和错误忽略机制
+          timeout 1h docker run --rm \
+            -v ${{ github.workspace }}/config:/app/config \
+            -v ${{ github.workspace }}/output:/app/output \
+            ghcr.io/jackrun123/subs-check:latest \
+            -c /app/config/config.yaml || true
           
-          echo "所有订阅处理完成"
+          echo "容器运行完成"
+          echo "=== 输出目录内容 ==="
+          ls -al output
           
-      - name: Finalize output
-        run: |
-          echo "最终处理有效节点..."
+          # 确保输出文件存在
+          if [ ! -f output/all.txt ]; then
+            echo "⚠ 警告: all.txt 未生成，创建空文件"
+            touch output/all.txt
+          fi
           
-          # 确保文件存在
-          touch output/valid_nodes.txt
-          touch output/all_nodes.txt
-          
-          # 去重有效节点
-          sort -u output/valid_nodes.txt > output/valid_nodes_deduped.txt
-          mv output/valid_nodes_deduped.txt output/valid_nodes.txt
-          
-          # 生成统计信息
-          VALID_COUNT=$(wc -l < output/valid_nodes.txt)
-          echo "有效节点数量: $VALID_COUNT"
-          echo "有效节点数量: $VALID_COUNT" > output/stats.txt
-          
-          # 创建最终结果文件
-          echo "# 有效节点列表" > output/result.txt
-          echo "# 生成时间: $(date)" >> output/result.txt
-          echo "# 有效节点数: $VALID_COUNT" >> output/result.txt
-          echo "" >> output/result.txt
-          cat output/valid_nodes.txt >> output/result.txt
-          
-          echo "输出文件准备完成"
+          echo "有效节点数量: $(wc -l < output/all.txt)"
           
       - name: Checkout target repository
         uses: actions/checkout@v4
@@ -104,28 +69,23 @@ jobs:
           
       - name: Copy and commit results
         run: |
-          echo "复制结果到目标仓库..."
+          echo "正在复制结果文件..."
           
-          # 确保目标目录存在
-          mkdir -p target-repo
-          
-          # 复制所有输出文件
-          cp -v output/result.txt target-repo/result.txt
-          cp -v output/all_nodes.txt target-repo/all_nodes.txt
-          cp -v output/stats.txt target-repo/stats.txt
+          # 复制输出文件
+          cp -v output/all.txt target-repo/all.txt
           
           cd target-repo
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # 添加并提交所有文件
-          git add .
+          git add all.txt
           
           if git diff-index --quiet HEAD --; then
             echo "没有变更，跳过提交"
           else
             TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S')
-            git commit -m "自动更新订阅检查结果 ($VALID_COUNT 个有效节点) $TIMESTAMP"
+            NODE_COUNT=$(wc -l < all.txt)
+            git commit -m "自动更新节点列表 ($NODE_COUNT 个节点) $TIMESTAMP"
             git push
             echo "✅ 提交成功！"
           fi
@@ -133,11 +93,7 @@ jobs:
       - name: Final verification
         run: |
           echo "=== 最终验证 ==="
-          echo "有效节点文件:"
-          wc -l target-repo/result.txt
-          echo ""
-          echo "所有节点文件:"
-          wc -l target-repo/all_nodes.txt
-          echo ""
-          echo "统计文件:"
-          cat target-repo/stats.txt
+          echo "目标仓库文件列表:"
+          ls -al target-repo
+          [ -f target-repo/all.txt ] && echo "节点数量: $(wc -l < target-repo/all.txt)" || echo "all.txt 不存在"
+          echo "工作流执行完成"
