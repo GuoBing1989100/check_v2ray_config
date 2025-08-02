@@ -6,51 +6,65 @@ on:
   workflow_dispatch:        # 允许手动触发
 
 jobs:
-  check-subscriptions:
+  check-and-push:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4  # 拉取当前仓库（包含配置文件）
+      # 步骤1: 检出当前仓库（包含配置文件）
+      - name: Checkout source repository
+        uses: actions/checkout@v4
         
-      - name: Verify config file
+      # 步骤2: 验证配置文件
+      - name: Verify configuration
         run: |
-          echo "检查配置文件..."
-          if [ -f config/config.yaml ]; then
-            echo "✅ 找到配置文件: config/config.yaml"
-            echo "=== 配置文件行数 ==="
-            wc -l config/config.yaml
-          else
+          echo "🔍 验证配置文件..."
+          if [ ! -f "config/config.yaml" ]; then
             echo "❌ 错误：未找到配置文件 config/config.yaml"
             exit 1
           fi
           
-      - name: Prepare environment
+          echo "✅ 配置文件存在"
+          echo "=== 关键配置预览 ==="
+          grep -E 'sub-urls:|output-dir:|concurrent:|timeout:' config/config.yaml
+          echo "订阅链接数量: $(grep -c '^- ' config/config.yaml)"
+        
+      # 步骤3: 准备环境
+      - name: Setup environment
         run: |
+          echo "🛠 准备环境..."
           # 创建输出目录
           mkdir -p output
-          
-          # 确保输出目录权限
+          # 确保权限
           chmod -R 777 output
-          
-          echo "工作目录结构:"
+          echo "当前目录结构:"
           ls -al
-          echo "配置文件内容摘要:"
-          grep -E 'sub-urls:|output-dir:|concurrent:' config/config.yaml
           
+      # 步骤4: 运行订阅检查器（核心步骤）
       - name: Run subscription checker
         run: |
-          echo "开始运行订阅检查器..."
+          echo "🚀 开始检查订阅节点..."
           
-          # 使用超时和错误忽略机制
-          timeout 1h docker run --rm \
+          # 显示内存信息
+          free -h
+          
+          # 记录开始时间
+          START_TIME=$(date +%s)
+          
+          # 运行订阅检查器
+          timeout 2h docker run --rm \
             -v ${{ github.workspace }}/config:/app/config \
             -v ${{ github.workspace }}/output:/app/output \
             ghcr.io/jackrun123/subs-check:latest \
-            -c /app/config/config.yaml || true
+            -c /app/config/config.yaml 2>&1 | tee check.log
           
-          echo "容器运行完成"
-          echo "=== 输出目录内容 ==="
-          ls -al output
+          # 记录结束时间
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+          
+          echo "⏱ 检查完成! 耗时: $DURATION 秒"
+          
+          # 显示检查日志摘要
+          echo "=== 检查日志摘要 ==="
+          grep -E '进度|可用|错误' check.log || echo "无关键日志"
           
           # 确保输出文件存在
           if [ ! -f output/all.txt ]; then
@@ -58,8 +72,11 @@ jobs:
             touch output/all.txt
           fi
           
-          echo "有效节点数量: $(wc -l < output/all.txt)"
+          # 显示节点统计
+          NODE_COUNT=$(wc -l < output/all.txt)
+          echo "📊 有效节点数量: $NODE_COUNT"
           
+      # 步骤5: 检出目标仓库
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
@@ -67,33 +84,53 @@ jobs:
           token: ${{ secrets.PAT_TOKEN }}
           path: target-repo
           
-      - name: Copy and commit results
+      # 步骤6: 推送结果
+      - name: Push results to target repository
         run: |
-          echo "正在复制结果文件..."
+          echo "📤 推送结果到目标仓库..."
           
-          # 复制输出文件
+          # 复制结果文件
           cp -v output/all.txt target-repo/all.txt
           
           cd target-repo
+          
+          # 配置Git用户
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
+          # 添加文件
           git add all.txt
           
+          # 检查变更
           if git diff-index --quiet HEAD --; then
-            echo "没有变更，跳过提交"
+            echo "🟢 没有变更，跳过提交"
           else
-            TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S')
+            # 获取节点数量
             NODE_COUNT=$(wc -l < all.txt)
+            TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S')
+            
+            # 创建提交
             git commit -m "自动更新节点列表 ($NODE_COUNT 个节点) $TIMESTAMP"
+            
+            # 推送变更
             git push
-            echo "✅ 提交成功！"
+            echo "✅ 提交成功! 推送了 $NODE_COUNT 个节点"
           fi
           
+      # 步骤7: 最终验证
       - name: Final verification
         run: |
-          echo "=== 最终验证 ==="
-          echo "目标仓库文件列表:"
+          echo "🔎 最终验证"
+          echo "目标仓库文件:"
           ls -al target-repo
-          [ -f target-repo/all.txt ] && echo "节点数量: $(wc -l < target-repo/all.txt)" || echo "all.txt 不存在"
-          echo "工作流执行完成"
+          
+          if [ -f target-repo/all.txt ]; then
+            NODE_COUNT=$(wc -l < target-repo/all.txt)
+            echo "📦 成功推送 $NODE_COUNT 个节点"
+            echo "前5个节点预览:"
+            head -n 5 target-repo/all.txt
+          else
+            echo "❌ 错误: all.txt 未找到"
+          fi
+          
+          echo "🎉 工作流执行完成"
