@@ -20,10 +20,9 @@ jobs:
             exit 1
           fi
           
-          # 确保输出目录在配置文件中正确设置
+          # 确保输出目录设置正确
           sed -i 's|output-dir:.*|output-dir: "/app/output"|' config/config.yaml
           echo "✅ 配置文件存在并已更新输出目录"
-          echo "输出目录: /app/output"
         
       - name: Setup environment
         run: |
@@ -33,9 +32,9 @@ jobs:
           echo "当前目录结构:"
           ls -al
           
-      - name: Run subscription checker (fixed)
+      - name: Run subscription checker
         run: |
-          echo "🚀 开始检查订阅节点 (修复版)..."
+          echo "🚀 开始检查订阅节点..."
           
           # 显示内存信息
           free -h
@@ -43,7 +42,7 @@ jobs:
           # 记录开始时间
           START_TIME=$(date +%s)
           
-          # 修复的Docker命令 - 使用正确的参数格式
+          # 运行订阅检查器
           docker run --rm \
             -v ${{ github.workspace }}/config:/app/config \
             -v ${{ github.workspace }}/output:/app/output \
