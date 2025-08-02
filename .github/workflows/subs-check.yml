@@ -2,18 +2,16 @@ name: V2Ray Subscription Checker
 
 on:
   schedule:
-    - cron: '0 */8 * * *'  # 每8小时运行一次
-  workflow_dispatch:        # 允许手动触发
+    - cron: '0 */8 * * *'
+  workflow_dispatch:
 
 jobs:
   check-and-push:
     runs-on: ubuntu-latest
     steps:
-      # 步骤1: 检出当前仓库（包含配置文件）
       - name: Checkout source repository
         uses: actions/checkout@v4
         
-      # 步骤2: 验证配置文件
       - name: Verify configuration
         run: |
           echo "🔍 验证配置文件..."
@@ -22,26 +20,22 @@ jobs:
             exit 1
           fi
           
-          echo "✅ 配置文件存在"
-          echo "=== 关键配置预览 ==="
-          grep -E 'sub-urls:|output-dir:|concurrent:|timeout:' config/config.yaml
-          echo "订阅链接数量: $(grep -c '^- ' config/config.yaml)"
+          # 确保输出目录在配置文件中正确设置
+          sed -i 's|output-dir:.*|output-dir: "/app/output"|' config/config.yaml
+          echo "✅ 配置文件存在并已更新输出目录"
+          echo "输出目录: /app/output"
         
-      # 步骤3: 准备环境
       - name: Setup environment
         run: |
           echo "🛠 准备环境..."
-          # 创建输出目录
           mkdir -p output
-          # 确保权限
           chmod -R 777 output
           echo "当前目录结构:"
           ls -al
           
-      # 步骤4: 运行订阅检查器（核心步骤）
-      - name: Run subscription checker
+      - name: Run subscription checker (fixed)
         run: |
-          echo "🚀 开始检查订阅节点..."
+          echo "🚀 开始检查订阅节点 (修复版)..."
           
           # 显示内存信息
           free -h
@@ -49,12 +43,12 @@ jobs:
           # 记录开始时间
           START_TIME=$(date +%s)
           
-          # 运行订阅检查器
-          timeout 2h docker run --rm \
+          # 修复的Docker命令 - 使用正确的参数格式
+          docker run --rm \
             -v ${{ github.workspace }}/config:/app/config \
             -v ${{ github.workspace }}/output:/app/output \
             ghcr.io/jackrun123/subs-check:latest \
-            -c /app/config/config.yaml 2>&1 | tee check.log
+            --config /app/config/config.yaml 2>&1 | tee check.log
           
           # 记录结束时间
           END_TIME=$(date +%s)
@@ -76,7 +70,6 @@ jobs:
           NODE_COUNT=$(wc -l < output/all.txt)
           echo "📊 有效节点数量: $NODE_COUNT"
           
-      # 步骤5: 检出目标仓库
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
@@ -84,46 +77,29 @@ jobs:
           token: ${{ secrets.PAT_TOKEN }}
           path: target-repo
           
-      # 步骤6: 推送结果
       - name: Push results to target repository
         run: |
           echo "📤 推送结果到目标仓库..."
-          
-          # 复制结果文件
           cp -v output/all.txt target-repo/all.txt
           
           cd target-repo
-          
-          # 配置Git用户
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
-          # 添加文件
           git add all.txt
           
-          # 检查变更
           if git diff-index --quiet HEAD --; then
             echo "🟢 没有变更，跳过提交"
           else
-            # 获取节点数量
             NODE_COUNT=$(wc -l < all.txt)
             TIMESTAMP=$(date +'%Y-%m-%d %H:%M:%S')
-            
-            # 创建提交
             git commit -m "自动更新节点列表 ($NODE_COUNT 个节点) $TIMESTAMP"
-            
-            # 推送变更
             git push
             echo "✅ 提交成功! 推送了 $NODE_COUNT 个节点"
           fi
           
-      # 步骤7: 最终验证
       - name: Final verification
         run: |
           echo "🔎 最终验证"
-          echo "目标仓库文件:"
-          ls -al target-repo
-          
           if [ -f target-repo/all.txt ]; then
             NODE_COUNT=$(wc -l < target-repo/all.txt)
             echo "📦 成功推送 $NODE_COUNT 个节点"
@@ -132,5 +108,4 @@ jobs:
           else
             echo "❌ 错误: all.txt 未找到"
           fi
-          
           echo "🎉 工作流执行完成"
