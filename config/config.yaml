@@ -15,8 +15,17 @@ timeout: 1000
 # 建议使用自己上传到Cloudflare R2的文件
 # speed-test-url: https://gh-proxy.henryjiu.workers.dev/https://github.com/AaronFeng753/Waifu2x-Extension-GUI/releases/download/v2.21.12/Waifu2x-Extension-GUI-v2.21.12-Portable.7z
 
+# 输出目录设置为挂载点
+output-dir: "/app/output"
+
+# 输出格式为 base64
+output-format: base64
+
 # 最低测速结果舍弃(KB/s)
 min-speed: 1024
+
+# 跳过错误（双重确保）
+skip_error: true
 
 # 下载测试时间(s)(与下载链接大小相关，默认最大测试10s)
 download-timeout: 5
