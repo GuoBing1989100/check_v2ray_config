@@ -19,7 +19,6 @@ jobs:
             echo "❌ 错误：未找到配置文件 config/config.yaml"
             exit 1
           fi
-          
           # 确保输出目录设置正确
           sed -i 's|output-dir:.*|output-dir: "/app/output"|' config/config.yaml
           echo "✅ 配置文件存在并已更新输出目录"
@@ -28,35 +27,60 @@ jobs:
         run: |
           echo "🛠 准备环境..."
           mkdir -p output
-          # 设置完全权限
           chmod -R 777 output
           chmod -R 777 config
-          echo "当前目录结构:"
-          ls -al
           
-      - name: Run subscription checker (fixed permission)
+      - name: Inspect Docker image
         run: |
-          echo "🚀 开始检查订阅节点 (权限修复版)..."
+          echo "🔎 检查 Docker 镜像结构..."
+          # 查看镜像的入口点设置
+          docker inspect --format='{{.Config.Entrypoint}}' ghcr.io/jackrun123/subs-check:latest
           
-          # 记录开始时间
-          START_TIME=$(date +%s)
+          # 查看镜像的命令设置
+          docker inspect --format='{{.Config.Cmd}}' ghcr.io/jackrun123/subs-check:latest
           
-          # 尝试直接执行容器内的二进制文件
-          docker run --rm \
-            -v ${{ github.workspace }}/config:/app/config \
-            -v ${{ github.workspace }}/output:/app/output \
-            --entrypoint /app/subs-check \
-            ghcr.io/jackrun123/subs-check:latest \
-            -c /app/config/config.yaml 2>&1 | tee check.log
+          # 查看镜像的文件结构
+          docker run --rm --entrypoint ls ghcr.io/jackrun123/subs-check:latest -l /app
           
-          # 记录结束时间
-          END_TIME=$(date +%s)
-          DURATION=$((END_TIME - START_TIME))
-          echo "⏱ 检查完成! 耗时: $DURATION 秒"
+      - name: Run subscription checker
+        run: |
+          echo "🚀 尝试运行订阅检查器..."
           
-          # 显示检查日志摘要
-          echo "=== 检查日志摘要 ==="
-          grep -E '进度|可用|错误' check.log || echo "无关键日志"
+          # 尝试多种可能的入口点组合
+          ENTRYPOINTS=(
+            "/app/subs-check"
+            "/app/main"
+            "/app/check"
+            "/app/cli"
+            ""
+          )
+          
+          for entry in "${ENTRYPOINTS[@]}"; do
+            echo "尝试入口点: ${entry:-<默认>}"
+            
+            # 构建Docker命令
+            cmd="docker run --rm \
+              -v $PWD/config:/app/config \
+              -v $PWD/output:/app/output"
+            
+            if [ -n "$entry" ]; then
+              cmd+=" --entrypoint $entry"
+            fi
+            
+            cmd+=" ghcr.io/jackrun123/subs-check:latest"
+            
+            if [ -n "$entry" ]; then
+              cmd+=" -c /app/config/config.yaml"
+            fi
+            
+            # 运行命令并捕获输出
+            if $cmd 2>&1 | tee -a check.log; then
+              echo "✅ 检查器运行成功!"
+              break
+            else
+              echo "⚠ 尝试失败，错误代码: $?"
+            fi
+          done
           
           # 确保输出文件存在
           if [ ! -f output/all.txt ]; then
@@ -64,9 +88,7 @@ jobs:
             touch output/all.txt
           fi
           
-          # 显示节点统计
-          NODE_COUNT=$(wc -l < output/all.txt)
-          echo "📊 有效节点数量: $NODE_COUNT"
+          echo "📊 输出文件行数: $(wc -l < output/all.txt)"
           
       - name: Checkout target repository
         uses: actions/checkout@v4
@@ -101,9 +123,8 @@ jobs:
           if [ -f target-repo/all.txt ]; then
             NODE_COUNT=$(wc -l < target-repo/all.txt)
             echo "📦 成功推送 $NODE_COUNT 个节点"
-            echo "前5个节点预览:"
-            head -n 5 target-repo/all.txt
+            echo "文件内容类型:"
+            file target-repo/all.txt
           else
             echo "❌ 错误: all.txt 未找到"
           fi
-          echo "🎉 工作流执行完成"
