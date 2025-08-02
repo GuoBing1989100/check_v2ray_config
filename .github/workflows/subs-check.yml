@@ -28,45 +28,35 @@ jobs:
         run: |
           echo "🛠 准备环境..."
           mkdir -p output
+          # 设置完全权限
           chmod -R 777 output
+          chmod -R 777 config
           echo "当前目录结构:"
           ls -al
           
-      - name: Run subscription checker (fixed parameter format)
+      - name: Run subscription checker (fixed permission)
         run: |
-          echo "🚀 开始检查订阅节点 (参数格式修复版)..."
+          echo "🚀 开始检查订阅节点 (权限修复版)..."
           
           # 记录开始时间
           START_TIME=$(date +%s)
           
-          # 尝试三种可能的参数格式
-          echo "尝试参数格式: config /app/config/config.yaml"
+          # 尝试直接执行容器内的二进制文件
           docker run --rm \
             -v ${{ github.workspace }}/config:/app/config \
             -v ${{ github.workspace }}/output:/app/output \
+            --entrypoint /app/subs-check \
             ghcr.io/jackrun123/subs-check:latest \
-            config /app/config/config.yaml || \
-          (
-            echo "格式1失败，尝试格式2: -config /app/config/config.yaml"
-            docker run --rm \
-              -v ${{ github.workspace }}/config:/app/config \
-              -v ${{ github.workspace }}/output:/app/output \
-              ghcr.io/jackrun123/subs-check:latest \
-              -config /app/config/config.yaml || \
-            (
-              echo "格式2失败，尝试格式3: /app/config/config.yaml"
-              docker run --rm \
-                -v ${{ github.workspace }}/config:/app/config \
-                -v ${{ github.workspace }}/output:/app/output \
-                ghcr.io/jackrun123/subs-check:latest \
-                /app/config/config.yaml
-            )
-          )
+            -c /app/config/config.yaml 2>&1 | tee check.log
           
           # 记录结束时间
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))
           echo "⏱ 检查完成! 耗时: $DURATION 秒"
+          
+          # 显示检查日志摘要
+          echo "=== 检查日志摘要 ==="
+          grep -E '进度|可用|错误' check.log || echo "无关键日志"
           
           # 确保输出文件存在
           if [ ! -f output/all.txt ]; then
